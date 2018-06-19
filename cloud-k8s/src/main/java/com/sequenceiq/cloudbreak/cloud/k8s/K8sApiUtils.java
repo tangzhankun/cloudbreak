@@ -1,4 +1,4 @@
-package com.sequenceiq.cloudbreak.cloud.yarn;
+package com.sequenceiq.cloudbreak.cloud.k8s;
 
 import java.io.IOException;
 import java.util.ArrayList;

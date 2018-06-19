@@ -1,4 +1,4 @@
-package com.sequenceiq.cloudbreak.cloud.yarn;
+package com.sequenceiq.cloudbreak.cloud.k8s;
 
 import static com.sequenceiq.cloudbreak.common.type.ResourceType.YARN_APPLICATION;
 
@@ -124,7 +124,7 @@ public class K8sResourceConnector implements ResourceConnector<Object> {
         List<CloudResourceStatus> result = new ArrayList<>();
         for (CloudResource resource : resources) {
             switch (resource.getType()) {
-                case YARN_APPLICATION:
+                case K8S_APPLICATION:
                     result.add(new CloudResourceStatus(resource, ResourceStatus.CREATED));
                     break;
                 default:
@@ -140,7 +140,7 @@ public class K8sResourceConnector implements ResourceConnector<Object> {
         List<CloudResourceStatus> result = new ArrayList<>();
         for (CloudResource resource : cloudResources) {
             switch (resource.getType()) {
-                case YARN_APPLICATION:
+                case K8S_APPLICATION:
                     K8sApiUtils.deleteK8sApp(resource.getName());
                     result.add(new CloudResourceStatus(resource, ResourceStatus.DELETED));
                     break;
@@ -158,18 +158,18 @@ public class K8sResourceConnector implements ResourceConnector<Object> {
 
     @Override
     public List<CloudResourceStatus> upscale(AuthenticatedContext authenticatedContext, CloudStack stack, List<CloudResource> resources) {
-        throw new CloudOperationNotSupportedException("Upscale stack operation is not supported on YARN");
+        throw new CloudOperationNotSupportedException("Upscale stack operation is not supported on K8S");
     }
 
     @Override
     public List<CloudResourceStatus> downscale(AuthenticatedContext authenticatedContext, CloudStack stack, List<CloudResource> resources,
             List<CloudInstance> vms, Object resourcesToRemove) {
-        throw new CloudOperationNotSupportedException("Downscale stack operation is not supported on YARN");
+        throw new CloudOperationNotSupportedException("Downscale stack operation is not supported on K8S");
     }
 
     @Override
     public Object collectResourcesToRemove(AuthenticatedContext authenticatedContext, CloudStack stack, List<CloudResource> resources, List<CloudInstance> vms) {
-        throw new CloudOperationNotSupportedException("Downscale resources collection operation is not supported on YARN");
+        throw new CloudOperationNotSupportedException("Downscale resources collection operation is not supported on K8S");
     }
 
     @Override

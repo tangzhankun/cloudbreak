@@ -1,4 +1,4 @@
-package com.sequenceiq.cloudbreak.cloud.yarn;
+package com.sequenceiq.cloudbreak.cloud.k8s;
 
 import java.io.IOException;
 import java.util.List;
@@ -75,7 +75,7 @@ public class K8sMetadataCollector implements MetadataCollector {
 
     private CloudResource getYarnApplcationResource(Iterable<CloudResource> resourceList) {
         for (CloudResource resource : resourceList) {
-            if (resource.getType() == ResourceType.YARN_APPLICATION) {
+            if (resource.getType() == ResourceType.K8S_APPLICATION) {
                 return resource;
             }
         }

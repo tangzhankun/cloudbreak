@@ -41,6 +41,9 @@ public enum ResourceType {
     // YARN
     YARN_APPLICATION(CommonResourceType.TEMPLATE),
 
+    // YARN
+    K8S_APPLICATION(CommonResourceType.TEMPLATE),
+
     // MOCK
     MOCK_INSTANCE;
 

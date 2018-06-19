@@ -1,7 +1,8 @@
-package com.sequenceiq.cloudbreak.cloud.yarn;
+package com.sequenceiq.cloudbreak.cloud.k8s;
 
 import java.util.Collections;
 import java.util.List;
+
 import javax.inject.Inject;
 
 import org.springframework.stereotype.Service;
@@ -17,36 +18,39 @@ import com.sequenceiq.cloudbreak.cloud.PlatformResources;
 import com.sequenceiq.cloudbreak.cloud.ResourceConnector;
 import com.sequenceiq.cloudbreak.cloud.Setup;
 import com.sequenceiq.cloudbreak.cloud.Validator;
+import com.sequenceiq.cloudbreak.cloud.k8s.auth.K8sAuthenticator;
+import com.sequenceiq.cloudbreak.cloud.k8s.auth.K8sCredentialConnector;
 import com.sequenceiq.cloudbreak.cloud.model.Platform;
 import com.sequenceiq.cloudbreak.cloud.model.Variant;
-import com.sequenceiq.cloudbreak.cloud.yarn.auth.YarnAuthenticator;
-import com.sequenceiq.cloudbreak.cloud.yarn.auth.YarnCredentialConnector;
 
 @Service
-public class YarnConnector implements CloudConnector {
+public class K8sConnector implements CloudConnector {
     @Inject
-    private YarnAuthenticator authenticator;
+    private K8sAuthenticator authenticator;
 
     @Inject
-    private YarnProvisionSetup provisionSetup;
+    private K8sProvisionSetup provisionSetup;
 
     @Inject
-    private YarnCredentialConnector credentialConnector;
+    private K8sCredentialConnector credentialConnector;
 
     @Inject
-    private YarnResourceConnector resourceConnector;
+    private K8sResourceConnector resourceConnector;
 
     @Inject
-    private YarnInstanceConnector instanceConnector;
+    private K8sInstanceConnector instanceConnector;
 
     @Inject
-    private YarnMetadataCollector metadataCollector;
+    private K8sMetadataCollector metadataCollector;
 
     @Inject
-    private YarnPlatformParameters platformParameters;
+    private K8sPlatformParameters platformParameters;
 
     @Inject
-    private YarnPlatformResources platformResources;
+    private K8sPlatformResources platformResources;
+
+    @Inject
+    private K8sConstants k8sConstants;
 
     @Override
     public Authenticator authentication() {
@@ -95,16 +99,16 @@ public class YarnConnector implements CloudConnector {
 
     @Override
     public Platform platform() {
-        return YarnConstants.YARN_PLATFORM;
+        return K8sConstants.K8S_PLATFORM;
     }
 
     @Override
     public Variant variant() {
-        return YarnConstants.YARN_VARIANT;
+        return K8sConstants.K8S_VARIANT;
     }
 
     @Override
     public CloudConstant cloudConstant() {
-        return null;
+        return k8sConstants;
     }
 }

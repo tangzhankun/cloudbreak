@@ -1,4 +1,4 @@
-package com.sequenceiq.cloudbreak.cloud.yarn;
+package com.sequenceiq.cloudbreak.cloud.k8s;
 
 /**
  * The unnatural K8s artifact that represents a fat container connected up via a pod to a service
