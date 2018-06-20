@@ -5,9 +5,13 @@ import static org.junit.Assert.assertNotNull;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -20,26 +24,25 @@ import javax.ws.rs.core.Response;
 import org.apache.commons.io.FileUtils;
 import org.assertj.core.util.Lists;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sequenceiq.cloudbreak.TestUtil;
+import com.sequenceiq.cloudbreak.client.ConfigKey;
 import com.sequenceiq.cloudbreak.client.RestClientUtil;
 import com.sequenceiq.cloudbreak.cloud.model.catalog.CloudbreakImageCatalogV2;
 import com.sequenceiq.cloudbreak.cloud.model.catalog.CloudbreakVersion;
 import com.sequenceiq.cloudbreak.cloud.model.catalog.Image;
 import com.sequenceiq.cloudbreak.core.CloudbreakImageCatalogException;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(RestClientUtil.class)
+@RunWith(MockitoJUnitRunner.class)
 public class ImageCatalogProviderTest {
 
     private static final String CB_IMAGE_CATALOG_V2_JSON = "cb-image-catalog-v2.json";
@@ -85,6 +88,22 @@ public class ImageCatalogProviderTest {
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
+    private Map<ConfigKey, Client> clientMap = new HashMap<>();
+
+    @Before
+    public void setUp() throws Exception {
+        clientMap.put(new ConfigKey(false, false, false), clientMock);
+
+        Field field = RestClientUtil.class.getDeclaredField("CLIENTS");
+        field.setAccessible(true);
+
+        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        modifiersField.setAccessible(true);
+        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+
+        field.set(null, clientMap);
+    }
+
     @Test
     public void testReadImageCatalogFromFile() throws Exception {
 
@@ -99,7 +118,8 @@ public class ImageCatalogProviderTest {
         List<String> imageIds = ver.get().getImageIds();
         assertNotNull("Check that the parsed ImageCatalog contains the desired version of Cloudbreak with image id(s).", imageIds);
         Optional<String> imageIdOptional = imageIds.stream().findFirst();
-        Assert.assertTrue("Check that the parsed ImageCatalog contains Ambari image reference for the Cloudbreak version.", imageIdOptional.isPresent());
+        Assert.assertTrue("Check that the parsed ImageCatalog contains Ambari image reference for the Cloudbreak version.",
+                imageIdOptional.isPresent());
         String imageId = imageIdOptional.get();
         boolean baseImageFound = false;
         boolean hdpImageFound = false;
@@ -118,7 +138,7 @@ public class ImageCatalogProviderTest {
     }
 
     @Test
-    public void testImageCatalogErrorWhenNull() throws CloudbreakImageCatalogException {
+    public void testImageCatalogErrorWhenNull() {
         String path = getPath(CB_IMAGE_CATALOG_NULL_FIELD_JSON);
         ReflectionTestUtils.setField(underTest, "etcConfigDir", path);
         String errorMessage = getErrorMessage(CB_IMAGE_CATALOG_NULL_FIELD_JSON);
@@ -138,7 +158,7 @@ public class ImageCatalogProviderTest {
     }
 
     @Test
-    public void testImageCatalogValid() throws CloudbreakImageCatalogException, IOException {
+    public void testImageCatalogValid() throws CloudbreakImageCatalogException {
         String path = getPath(CB_IMAGE_CATALOG_VALID_JSON);
         ReflectionTestUtils.setField(underTest, "etcConfigDir", path);
         underTest.getImageCatalogV2(CB_IMAGE_CATALOG_VALID_JSON);
@@ -200,12 +220,9 @@ public class ImageCatalogProviderTest {
 
     @Test
     public void testHttpImageCatalogValid() throws CloudbreakImageCatalogException, IOException {
-        PowerMockito.mockStatic(RestClientUtil.class);
-
         String path = getPath(CB_IMAGE_CATALOG_VALID_JSON);
         String catalogUrl = "http";
 
-        when(RestClientUtil.get()).thenReturn(clientMock);
         when(clientMock.target(catalogUrl)).thenReturn(webTargetMock);
         when(webTargetMock.request()).thenReturn(builderMock);
         when(builderMock.get()).thenReturn(responseMock);
@@ -225,13 +242,10 @@ public class ImageCatalogProviderTest {
     }
 
     @Test(expected = CloudbreakImageCatalogException.class)
-    public void testHttpImageCatalogNotValidJson() throws CloudbreakImageCatalogException, IOException {
-        PowerMockito.mockStatic(RestClientUtil.class);
-
+    public void testHttpImageCatalogNotValidJson() throws CloudbreakImageCatalogException {
         String path = getPath(CB_IMAGE_CATALOG_VALID_JSON);
         String catalogUrl = "http";
 
-        when(RestClientUtil.get()).thenReturn(clientMock);
         when(clientMock.target(catalogUrl)).thenReturn(webTargetMock);
         when(webTargetMock.request()).thenReturn(builderMock);
         when(builderMock.get()).thenReturn(responseMock);
@@ -245,7 +259,7 @@ public class ImageCatalogProviderTest {
     }
 
     @Test
-    public void testImageCatalogWithEmptyCloudBreakVersions() throws CloudbreakImageCatalogException, IOException {
+    public void testImageCatalogWithEmptyCloudBreakVersions() {
         String path = getPath(CB_IMAGE_CATALOG_EMPTY_CLOUDBREAK_VERSIONS_JSON);
         ReflectionTestUtils.setField(underTest, "etcConfigDir", path);
 
@@ -255,7 +269,7 @@ public class ImageCatalogProviderTest {
     }
 
     @Test
-    public void testImageCatalogFilterNullImages() throws CloudbreakImageCatalogException, IOException {
+    public void testImageCatalogFilterNullImages() throws CloudbreakImageCatalogException {
         String path = getPath(CB_IMAGE_CATALOG_FILTER_NULL_IMAGES_JSON);
         ReflectionTestUtils.setField(underTest, "etcConfigDir", path);
 
@@ -264,7 +278,7 @@ public class ImageCatalogProviderTest {
     }
 
     @Test
-    public void testImageCatalogWithoutHdfImages() throws CloudbreakImageCatalogException, IOException {
+    public void testImageCatalogWithoutHdfImages() throws CloudbreakImageCatalogException {
         String path = getPath(CB_IMAGE_CATALOG_WITHOUT_HDF_IMAGES);
         ReflectionTestUtils.setField(underTest, "etcConfigDir", path);
 
@@ -273,7 +287,7 @@ public class ImageCatalogProviderTest {
     }
 
     @Test
-    public void testImageCatalogWithoutHdpImages() throws CloudbreakImageCatalogException, IOException {
+    public void testImageCatalogWithoutHdpImages() throws CloudbreakImageCatalogException {
         String path = getPath(CB_IMAGE_CATALOG_WITHOUT_HDP_IMAGES);
         ReflectionTestUtils.setField(underTest, "etcConfigDir", path);
 
@@ -282,7 +296,7 @@ public class ImageCatalogProviderTest {
     }
 
     @Test
-    public void testImageCatalogWithoutBaseImages() throws CloudbreakImageCatalogException, IOException {
+    public void testImageCatalogWithoutBaseImages() throws CloudbreakImageCatalogException {
         String path = getPath(CB_IMAGE_CATALOG_WITHOUT_BASE_IMAGES);
         ReflectionTestUtils.setField(underTest, "etcConfigDir", path);
 
