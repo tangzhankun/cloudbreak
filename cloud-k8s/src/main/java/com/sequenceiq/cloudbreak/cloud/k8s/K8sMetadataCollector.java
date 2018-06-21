@@ -20,7 +20,6 @@ import com.sequenceiq.cloudbreak.cloud.model.CloudResource;
 import com.sequenceiq.cloudbreak.cloud.model.CloudVmInstanceStatus;
 import com.sequenceiq.cloudbreak.cloud.model.CloudVmMetaDataStatus;
 import com.sequenceiq.cloudbreak.cloud.model.InstanceStatus;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.Container;
 import com.sequenceiq.cloudbreak.common.type.ResourceType;
 import com.sequenceiq.cloudbreak.service.CloudbreakException;
 
@@ -33,11 +32,11 @@ public class K8sMetadataCollector implements MetadataCollector {
     public List<CloudVmMetaDataStatus> collect(AuthenticatedContext authenticatedContext, List<CloudResource> resources,
             List<CloudInstance> vms, List<CloudInstance> knownInstances) {
         try {
-            CloudResource yarnApplication = getYarnApplcationResource(resources);
+            CloudResource k8sApplication = getK8sApplcationResource(resources);
 
             List<CloudVmMetaDataStatus> cloudVmMetaDataStatuses = Lists.newArrayList();
             Map<String, Map<String, K8sServicePodContainer>> groupServicesByInstanceGroup =
-                    K8sApiUtils.collectContainersByGroup(yarnApplication.getName());
+                    K8sApiUtils.collectContainersByGroup(k8sApplication.getName());
 
             ListMultimap<String, CloudInstance> groupInstancesByInstanceGroup = groupInstancesByInstanceGroup(vms);
             for (Map.Entry<String, Map<String, K8sServicePodContainer>> e: groupServicesByInstanceGroup.entrySet()) {
@@ -73,13 +72,13 @@ public class K8sMetadataCollector implements MetadataCollector {
         }
     }
 
-    private CloudResource getYarnApplcationResource(Iterable<CloudResource> resourceList) {
+    private CloudResource getK8sApplcationResource(Iterable<CloudResource> resourceList) {
         for (CloudResource resource : resourceList) {
             if (resource.getType() == ResourceType.K8S_APPLICATION) {
                 return resource;
             }
         }
-        throw new CloudConnectorException(String.format("No resource found: %s", ResourceType.YARN_APPLICATION));
+        throw new CloudConnectorException(String.format("No resource found: %s", ResourceType.K8S_APPLICATION));
     }
 
     private ListMultimap<String, CloudInstance> groupInstancesByInstanceGroup(Iterable<CloudInstance> vms) {
@@ -87,15 +86,6 @@ public class K8sMetadataCollector implements MetadataCollector {
         for (CloudInstance vm : vms) {
             String groupName = vm.getTemplate().getGroupName();
             groupByInstanceGroup.put(groupName, vm);
-        }
-        return groupByInstanceGroup;
-    }
-
-    private ListMultimap<String, Container> groupContainersByInstanceGroup(Iterable<Container> containers) {
-        ListMultimap<String, Container> groupByInstanceGroup = ArrayListMultimap.create();
-        for (Container container : containers) {
-            String groupName = container.getComponentName();
-            groupByInstanceGroup.put(groupName, container);
         }
         return groupByInstanceGroup;
     }

@@ -1,5 +1,9 @@
 package com.sequenceiq.cloudbreak.cloud.k8s;
 
+import static com.sequenceiq.cloudbreak.cloud.k8s.client.K8sClient.appsV1beta1Api;
+import static com.sequenceiq.cloudbreak.cloud.k8s.client.K8sClient.appsV1beta2Api;
+import static com.sequenceiq.cloudbreak.cloud.k8s.client.K8sClient.coreV1Api;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -9,12 +13,11 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.YarnComponent;
+import com.sequenceiq.cloudbreak.cloud.k8s.client.K8sClient;
+import com.sequenceiq.cloudbreak.cloud.k8s.client.model.core.K8sComponent;
 import com.sequenceiq.cloudbreak.service.CloudbreakException;
 
-import io.kubernetes.client.ApiClient;
 import io.kubernetes.client.ApiException;
-import io.kubernetes.client.Configuration;
 import io.kubernetes.client.apis.AppsV1beta1Api;
 import io.kubernetes.client.apis.AppsV1beta2Api;
 import io.kubernetes.client.apis.CoreV1Api;
@@ -45,9 +48,6 @@ import io.kubernetes.client.models.V1Volume;
 import io.kubernetes.client.models.V1VolumeMount;
 import io.kubernetes.client.models.V1beta2ReplicaSet;
 import io.kubernetes.client.models.V1beta2ReplicaSetList;
-import io.kubernetes.client.util.Config;
-import io.kubernetes.client.util.KubeConfig;
-import io.kubernetes.client.util.authenticators.GCPAuthenticator;
 
 public class K8sApiUtils {
     private static final Logger LOGGER = LoggerFactory.getLogger(K8sApiUtils.class);
@@ -55,8 +55,6 @@ public class K8sApiUtils {
     private static final int SSH_PORT = 22;
 
     private static final int NGNIX_PORT = 9443;
-
-    private static final String IMAGE_NAME = "gcr.io/rvenkatesh-196122/hdp-image:tag8";
 
     private static final String CB_CONFIG_NAME = "cb-config";
 
@@ -78,14 +76,10 @@ public class K8sApiUtils {
     }
 
     public static Map<String, Map<String, K8sServicePodContainer>> collectContainersByGroup(String hdpClusterName)
-            throws ApiException, IOException, InterruptedException, CloudbreakException {
+            throws ApiException, InterruptedException, CloudbreakException {
         Map<String, Map<String, K8sServicePodContainer>> result = new HashMap<>();
 
-        ApiClient client = getApiClient();
-        Configuration.setDefaultApiClient(client);
-
-        CoreV1Api api = new CoreV1Api();
-        V1ServiceList services = api.listServiceForAllNamespaces(null, null, true,
+        V1ServiceList services = coreV1Api().listServiceForAllNamespaces(null, null, true,
                 getClusterLabelSelector(hdpClusterName),
                 0, null, null, 0, false);
 
@@ -111,7 +105,7 @@ public class K8sApiUtils {
             done = totalNumberOfServices == totalSoFar;
             Thread.sleep(API_RETRY_INTERVAL);
             numAttempts--;
-            services = api.listServiceForAllNamespaces(null, null, true,
+            services = coreV1Api().listServiceForAllNamespaces(null, null, true,
                     getClusterLabelSelector(hdpClusterName),
                     0, null, null, 0, false);
         }
@@ -152,34 +146,14 @@ public class K8sApiUtils {
         return totalSoFar;
     }
 
-    public static void createK8sApp(String hdpClusterName, YarnComponent component)
+    public static void createK8sApp(String hdpClusterName, K8sComponent component)
             throws Exception {
         String configPropsString = writeParameters(component.getConfiguration().getProperties());
-
-        ApiClient client = getApiClient();
-        Configuration.setDefaultApiClient(client);
-
-        CoreV1Api api = new CoreV1Api();
-        //get HDP deployments
-        AppsV1beta1Api appsV1beta1Api = new AppsV1beta1Api(client);
-
-        createK8sArtifactsForGroup(api, appsV1beta1Api, configPropsString, hdpClusterName, component.getName(), component);
+        createK8sArtifactsForGroup(coreV1Api(), appsV1beta1Api(), configPropsString, hdpClusterName, component.getName(), component);
     }
 
     public static void deleteK8sApp(String hdpClusterName) throws Exception {
-        ApiClient client = getApiClient();
-        Configuration.setDefaultApiClient(client);
-
-        CoreV1Api api = new CoreV1Api();
-        //get HDP deployments
-        AppsV1beta1Api appsV1beta1Api = new AppsV1beta1Api(client);
-        AppsV1beta2Api appsV1beta2Api = new AppsV1beta2Api(client);
-        deleteK8sArtifacts(api, appsV1beta1Api, appsV1beta2Api, hdpClusterName);
-    }
-
-    private static ApiClient getApiClient() throws IOException {
-        KubeConfig.registerAuthenticator(new GCPAuthenticator());
-        return Config.defaultClient();
+        deleteK8sArtifacts(coreV1Api(), appsV1beta1Api(), appsV1beta2Api(), hdpClusterName);
     }
 
     private static String writeParameters(Map<String, String> parameters) {
@@ -191,7 +165,7 @@ public class K8sApiUtils {
     }
 
     private static void createK8sArtifactsForGroup(CoreV1Api api, AppsV1beta1Api appsV1beta1Api, String configPropsString,
-            String hdpClusterName, String group, YarnComponent component) throws ApiException {
+            String hdpClusterName, String group, K8sComponent component) throws ApiException {
         String configName = CB_CONFIG_NAME + "-" + hdpClusterName + "-" + group;
         createConfigMap(api, hdpClusterName, configName, configPropsString);
         for (int i = 0; i < component.getNumberOfContainers(); i++) {
@@ -332,28 +306,12 @@ public class K8sApiUtils {
     }
 
     private static void createConfigMap(CoreV1Api api, String hdpClusterName, String cbConfigName, String configPropsString) throws ApiException {
-        V1ConfigMap body = new V1ConfigMap();
-
-        V1ObjectMeta configMeta = new V1ObjectMeta();
-        body.setMetadata(configMeta);
-        Map<String, String> labels = new HashMap<>();
-        configMeta.setLabels(labels);
-        labels.put(HWX_DPS_CLUSTER_NAME, hdpClusterName);
-
-        configMeta.setName(cbConfigName);
-
-        Map<String, String> configData = new HashMap<>();
-        body.setData(configData);
-
-        configData.put("cloudbreak-config.props", configPropsString);
-
-        api.createNamespacedConfigMap(DEFAULT_NAMESPACE, body, null);
-        LOGGER.info("Created ConfigMap " + cbConfigName);
+        K8sClient.createConfigMap(coreV1Api(), "default", cbConfigName, configPropsString);
     }
 
     private static void createDeployment(AppsV1beta1Api appsV1beta1Api,
             String hdpClusterName, String group, String configName, String appName,
-            String imageName, YarnComponent component) throws ApiException {
+            String imageName, K8sComponent component) throws ApiException {
         AppsV1beta1Deployment deployment = new AppsV1beta1Deployment();
 
         deployment.setKind("Deployment");

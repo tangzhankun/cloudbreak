@@ -1,44 +1,66 @@
 package com.sequenceiq.cloudbreak.cloud.k8s;
 
-import static com.sequenceiq.cloudbreak.common.type.ResourceType.YARN_APPLICATION;
+import static com.sequenceiq.cloudbreak.common.type.ResourceType.K8S_APPLICATION;
 
+import java.io.IOException;
+import java.net.MalformedURLException;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Optional;
+
+import javax.inject.Inject;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.google.common.base.Splitter;
-import com.google.common.collect.Maps;
 import com.sequenceiq.cloudbreak.api.model.AdjustmentType;
-import com.sequenceiq.cloudbreak.cloud.PlatformParametersConsts;
 import com.sequenceiq.cloudbreak.cloud.ResourceConnector;
 import com.sequenceiq.cloudbreak.cloud.context.AuthenticatedContext;
 import com.sequenceiq.cloudbreak.cloud.exception.CloudConnectorException;
 import com.sequenceiq.cloudbreak.cloud.exception.CloudOperationNotSupportedException;
 import com.sequenceiq.cloudbreak.cloud.exception.TemplatingDoesNotSupportedException;
+import com.sequenceiq.cloudbreak.cloud.k8s.auth.K8sClientUtil;
+import com.sequenceiq.cloudbreak.cloud.k8s.auth.K8sCredentialView;
+import com.sequenceiq.cloudbreak.cloud.k8s.client.model.core.K8sComponent;
 import com.sequenceiq.cloudbreak.cloud.model.CloudInstance;
 import com.sequenceiq.cloudbreak.cloud.model.CloudResource;
 import com.sequenceiq.cloudbreak.cloud.model.CloudResource.Builder;
 import com.sequenceiq.cloudbreak.cloud.model.CloudResourceStatus;
 import com.sequenceiq.cloudbreak.cloud.model.CloudStack;
 import com.sequenceiq.cloudbreak.cloud.model.Group;
-import com.sequenceiq.cloudbreak.cloud.model.InstanceTemplate;
 import com.sequenceiq.cloudbreak.cloud.model.ResourceStatus;
 import com.sequenceiq.cloudbreak.cloud.model.TlsInfo;
 import com.sequenceiq.cloudbreak.cloud.notification.PersistenceNotifier;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.Artifact;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.ConfigFile;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.ConfigFileType;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.Configuration;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.Resource;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.YarnComponent;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.request.CreateApplicationRequest;
+
+import io.kubernetes.client.ApiClient;
+import io.kubernetes.client.ApiException;
+import io.kubernetes.client.Configuration;
+import io.kubernetes.client.apis.CoreV1Api;
+import io.kubernetes.client.custom.Quantity;
+import io.kubernetes.client.models.AppsV1beta1Deployment;
+import io.kubernetes.client.models.AppsV1beta1DeploymentSpec;
+import io.kubernetes.client.models.V1ConfigMap;
+import io.kubernetes.client.models.V1ConfigMapVolumeSource;
+import io.kubernetes.client.models.V1Container;
+import io.kubernetes.client.models.V1ContainerPort;
+import io.kubernetes.client.models.V1LabelSelector;
+import io.kubernetes.client.models.V1ObjectMeta;
+import io.kubernetes.client.models.V1PodSpec;
+import io.kubernetes.client.models.V1PodTemplateSpec;
+import io.kubernetes.client.models.V1ResourceRequirements;
+import io.kubernetes.client.models.V1SecurityContext;
+import io.kubernetes.client.models.V1Service;
+import io.kubernetes.client.models.V1ServiceSpec;
+import io.kubernetes.client.models.V1Volume;
+import io.kubernetes.client.models.V1VolumeMount;
+import io.kubernetes.client.util.Config;
+import io.kubernetes.client.util.KubeConfig;
+import io.kubernetes.client.util.authenticators.GCPAuthenticator;
 
 @Service
 public class K8sResourceConnector implements ResourceConnector<Object> {
@@ -47,76 +69,243 @@ public class K8sResourceConnector implements ResourceConnector<Object> {
 
     private static final String ARTIFACT_TYPE_DOCKER = "DOCKER";
 
-    private static final int APP_NAME_LENGTH = 128;
+    private static final String CB_CLUSTER_NAME = "cb-cluster-name";
+
+    private static final String CB_CLUSTER_GROUP_NAME = "cb-cluster-name";
+
+    private static final String APP_NAME = "app";
+
+    private static final int SSH_PORT = 22;
+
+    private static final int NGNIX_PORT = 9443;
+
+    private static final int AMBARI_PORT = 443;
+
+    private static final int DEFAULT_MODE = 0744;
+
+    @Inject
+    private K8sClientUtil k8sClientUtil;
+
+    @Inject
+    private K8sResourceNameGenerator k8sResourceNameGenerator;
+
+    @Value("${cb.k8s.defaultNameSpace}")
+    private String defaultNameSpace;
+
+    @Value("${cb.k8s.defaultLifeTime:}")
+    private int defaultLifeTime;
 
     @Override
     public List<CloudResourceStatus> launch(AuthenticatedContext authenticatedContext, CloudStack stack, PersistenceNotifier persistenceNotifier,
             AdjustmentType adjustmentType, Long threshold) throws Exception {
+        K8sCredentialView k8sClient = k8sClientUtil.createK8sClient(authenticatedContext);
         String applicationName = createApplicationName(authenticatedContext);
 
-        createApplication(stack, applicationName);
 
-        CloudResource yarnApplication = new Builder().type(YARN_APPLICATION).name(applicationName).build();
-        persistenceNotifier.notifyAllocation(yarnApplication, authenticatedContext.getCloudContext());
-        return check(authenticatedContext, Collections.singletonList(yarnApplication));
-    }
-
-    private CreateApplicationRequest createApplication(CloudStack stack, String applicationName)
-            throws Exception {
-        CreateApplicationRequest createApplicationRequest = new CreateApplicationRequest();
-        createApplicationRequest.setName(applicationName);
-
-        Artifact artifact = new Artifact();
-        artifact.setId(stack.getImage().getImageName());
-        artifact.setType(ARTIFACT_TYPE_DOCKER);
-
-        List<YarnComponent> components = stack.getGroups().stream()
-                .map(group -> mapGroupToComponent(group, stack, artifact))
-                .collect(Collectors.toList());
-
-        createApplicationRequest.setComponents(components);
-        int i = 0;
-        for (YarnComponent c : components) {
-            K8sApiUtils.createK8sApp(applicationName, c);
+        if (!checkApplicationAlreadyCreated(k8sClient, applicationName)) {
+            createApplication(authenticatedContext, k8sClient, stack);
         }
-        return createApplicationRequest;
+
+        CloudResource k8sApplication = new Builder().type(K8S_APPLICATION).name(applicationName).build();
+        persistenceNotifier.notifyAllocation(k8sApplication, authenticatedContext.getCloudContext());
+        return check(authenticatedContext, Collections.singletonList(k8sApplication));
+
+        K8sComponent k8sComponent = new K8sComponent();
+        K8sApiUtils.createK8sApp(stack., applicationName);
     }
 
-    private YarnComponent mapGroupToComponent(Group group, CloudStack stack, Artifact artifact) {
-        return mapGroupToK8sComponent(group, stack, artifact);
+    public ApiClient apiClient() throws IOException {
+        KubeConfig.registerAuthenticator(new GCPAuthenticator());
+        return Config.defaultClient();
     }
 
-    private YarnComponent mapGroupToK8sComponent(Group group, CloudStack stack, Artifact artifact) {
-        YarnComponent component = new YarnComponent();
-        component.setName(group.getName());
-        component.setNumberOfContainers(group.getInstancesSize());
-        String userData = stack.getImage().getUserDataByType(group.getType());
-        component.setLaunchCommand(String.format("/bootstrap/start-systemd '%s' '%s' '%s'", Base64.getEncoder().encodeToString(userData.getBytes()),
-                stack.getLoginUserName(), stack.getPublicKey()));
-        component.setArtifact(artifact);
-        component.setDependencies(new ArrayList<>());
-        InstanceTemplate instanceTemplate = group.getReferenceInstanceConfiguration().getTemplate();
-        Resource resource = new Resource();
-        resource.setCpus(instanceTemplate.getParameter(PlatformParametersConsts.CUSTOM_INSTANCETYPE_CPUS, Integer.class));
-        resource.setMemory(instanceTemplate.getParameter(PlatformParametersConsts.CUSTOM_INSTANCETYPE_MEMORY, Integer.class));
-        component.setResource(resource);
-        component.setRunPrivilegedContainer(true);
+    public CoreV1Api coreV1Api() throws IOException {
+        return new CoreV1Api();
+    }
 
-        Configuration configuration = new Configuration();
-        Map<String, String> propsMap = Maps.newHashMap();
-        propsMap.put("userData", '\'' + Base64.getEncoder().encodeToString(userData.getBytes()) + '\'');
-        propsMap.put("sshUser", '\'' + stack.getLoginUserName() + '\'');
-        propsMap.put("groupname", '\'' + group.getName() + '\'');
-        propsMap.put("sshPubKey", '\'' + stack.getPublicKey() + '\'');
-        configuration.setProperties(propsMap);
-        ConfigFile configFileProps = new ConfigFile();
-        configFileProps.setType(ConfigFileType.PROPERTIES.name());
-        configFileProps.setSrcFile("cb-conf");
-        configFileProps.setDestFile("/etc/cloudbreak-config.props");
-        configuration.setFiles(Collections.singletonList(configFileProps));
+    private void createApplication(AuthenticatedContext ac, K8sCredentialView k8sCredential, CloudStack stack) throws IOException, ApiException {
+        createApiClient();
+        createConfigMap(ac, stack);
+        for (Group group : stack.getGroups()) {
+            int i = 0;
+            for (CloudInstance cloudInstance : group.getInstances()) {
+                createInstance(ac, stack, group, i);
+                i++;
+            }
+        }
+    }
 
-        component.setConfiguration(configuration);
-        return component;
+    public Map<String, String> getLabels(String clusterName, Optional<String> groupName) {
+        Map<String, String> labels = new HashMap<>();
+        labels.put(APP_NAME, clusterName);
+        labels.put(CB_CLUSTER_NAME, clusterName);
+        if (groupName.isPresent()) {
+            labels.put(CB_CLUSTER_GROUP_NAME, groupName.orElse(null));
+        }
+        return labels;
+    }
+
+    private void createInstance(AuthenticatedContext ac, CloudStack stack, Group group, int i) {
+        String instanceName = k8sResourceNameGenerator.getInstanceContainerName(ac, group, i);
+        String groupName = k8sResourceNameGenerator.getGroupName(group);
+        String clusterName = k8sResourceNameGenerator.getClusterName(ac);
+
+        AppsV1beta1Deployment deployment = new AppsV1beta1Deployment();
+
+        deployment.setKind("Deployment");
+        deployment.setApiVersion("apps/v1beta1");
+        V1ObjectMeta meta = new V1ObjectMeta();
+        deployment.setMetadata(meta);
+
+        meta.setName(clusterName);
+        meta.setLabels(getLabels(clusterName, Optional.empty()));
+
+        AppsV1beta1DeploymentSpec spec = new AppsV1beta1DeploymentSpec();
+        deployment.setSpec(spec);
+
+        spec.setReplicas(1);
+
+        V1LabelSelector selector = new V1LabelSelector();
+        Map<String, String> matchLabels = new HashMap<>();
+        matchLabels.put(APP_NAME, clusterName);
+        matchLabels.put(CB_CLUSTER_NAME, clusterName);
+        selector.matchLabels(matchLabels);
+        spec.setSelector(selector);
+
+        V1PodTemplateSpec podTemplateSpec = new V1PodTemplateSpec();
+        spec.setTemplate(podTemplateSpec);
+
+        V1ObjectMeta podMeta = new V1ObjectMeta();
+        podMeta.setLabels(matchLabels);
+        podTemplateSpec.setMetadata(podMeta);
+
+        V1PodSpec podSpec = new V1PodSpec();
+        podTemplateSpec.setSpec(podSpec);
+
+        List<V1Container> containers = new ArrayList<>();
+        podSpec.setContainers(containers);
+
+        V1Container container = new V1Container();
+        containers.add(container);
+
+        container.setName(instanceName);
+        container.setImage(stack.getImage().getImageName());
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add("/sbin/init");
+        container.setCommand(cmd);
+
+        V1SecurityContext secContext = new V1SecurityContext();
+        secContext.setPrivileged(true);
+        container.setSecurityContext(secContext);
+
+        List<V1VolumeMount> volumeMounts = new ArrayList<>();
+        container.setVolumeMounts(volumeMounts);
+
+        V1VolumeMount configVolumeMount = new V1VolumeMount();
+        configVolumeMount.setName("config-volume");
+        configVolumeMount.setMountPath("/configmap");
+        volumeMounts.add(configVolumeMount);
+
+        List<V1ContainerPort> ports = new ArrayList<>();
+        container.setPorts(ports);
+
+        V1ContainerPort sshPort = new V1ContainerPort();
+        sshPort.setContainerPort(SSH_PORT);
+        sshPort.setName("ssh");
+        ports.add(sshPort);
+
+        V1ContainerPort ngnixPort = new V1ContainerPort();
+        ngnixPort.setName("ngnix");
+        ngnixPort.setContainerPort(NGNIX_PORT);
+        ports.add(ngnixPort);
+
+        V1ContainerPort saltPort = new V1ContainerPort();
+        saltPort.setName("ambari");
+        saltPort.setContainerPort(AMBARI_PORT);
+        ports.add(saltPort);
+
+        V1ResourceRequirements resources = new V1ResourceRequirements();
+        resources.putLimitsItem("memory", Quantity.fromString(group.getReferenceInstanceConfiguration().getTemplate(). + "Mi"));
+        resources.putLimitsItem("cpu", Quantity.fromString(component.getResource().getCpus() + ""));
+        container.setResources(resources);
+        List<V1Volume> volumes = new ArrayList<>();
+        podSpec.setVolumes(volumes);
+
+        V1Volume configVolume = new V1Volume();
+        configVolume.setName("config-volume");
+        V1ConfigMapVolumeSource configMap = new V1ConfigMapVolumeSource();
+        configMap.setDefaultMode(DEFAULT_MODE);
+        configMap.setName(configName);
+
+        configVolume.setConfigMap(configMap);
+        volumes.add(configVolume);
+
+        appsV1beta1Api.createNamespacedDeployment(DEFAULT_NAMESPACE, deployment, null);
+
+        LOGGER.info("Created Deployment " + appName);
+
+        V1Service serviceBody = new V1Service();
+
+        serviceBody.setMetadata(meta);
+
+        meta.setName(appName);
+        Map<String, String> labels = new HashMap<>();
+        labels.put(HWX_DPS_CLUSTER_NAME, hdpClusterName);
+        labels.put(HWX_DPS_CLUSTER_GROUP, group);
+        meta.setLabels(labels);
+
+        V1ServiceSpec serviceSpec = new V1ServiceSpec();
+        serviceSpec.setType("LoadBalancer");
+        Map<String, String> selectorMap = new HashMap<>();
+        serviceSpec.setSelector(selectorMap);
+
+        selectorMap.put("app", appName);
+
+        serviceBody.setSpec(serviceSpec);
+
+        api.createNamespacedService(DEFAULT_NAMESPACE, serviceBody, null);
+
+        LOGGER.info("Created Service " + appName);
+    }
+
+    private void createApiClient() throws IOException {
+        ApiClient client = apiClient();
+        Configuration.setDefaultApiClient(client);
+
+
+    }
+
+    private void createConfigMap(AuthenticatedContext ac, CloudStack stack) throws IOException, ApiException {
+        StringBuffer sb = new StringBuffer();
+        for (Map.Entry<String, String> e : stack.getParameters().entrySet()) {
+            sb.append(e.getKey()).append("=").append(e.getValue()).append("\n");
+        }
+        String configPropsString = sb.toString();
+
+        V1ConfigMap body = new V1ConfigMap();
+
+        V1ObjectMeta configMeta = new V1ObjectMeta();
+        body.setMetadata(configMeta);
+        Map<String, String> labels = new HashMap<>();
+        configMeta.setLabels(labels);
+        labels.put(CB_CLUSTER_NAME, k8sResourceNameGenerator.getClusterName(ac));
+
+
+        String configMapName = k8sResourceNameGenerator.getConfigMapName(ac);
+
+        configMeta.setName(configMapName);
+        Map<String, String> configData = new HashMap<>();
+        body.setData(configData);
+
+        configData.put("cloudbreak-config.props", configPropsString);
+
+        coreV1Api().createNamespacedConfigMap(defaultNameSpace, body, null);
+        LOGGER.info("Created ConfigMap " + configMapName);
+    }
+
+    private boolean checkApplicationAlreadyCreated(K8sCredentialView k8sCredential, String applicationName) throws MalformedURLException {
+        return true;
     }
 
     @Override
@@ -182,8 +371,4 @@ public class K8sResourceConnector implements ResourceConnector<Object> {
         throw new TemplatingDoesNotSupportedException();
     }
 
-    private String createApplicationName(AuthenticatedContext ac) {
-        return String.format("%s-%s", Splitter.fixedLength(APP_NAME_LENGTH - (ac.getCloudContext().getId().toString().length() + 1))
-                .splitToList(ac.getCloudContext().getName()).get(0), ac.getCloudContext().getId());
-    }
 }

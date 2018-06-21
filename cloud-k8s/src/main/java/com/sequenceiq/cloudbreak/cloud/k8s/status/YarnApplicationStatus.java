@@ -1,7 +1,7 @@
 package com.sequenceiq.cloudbreak.cloud.k8s.status;
 
+import com.sequenceiq.cloudbreak.cloud.k8s.client.model.core.ApplicationState;
 import com.sequenceiq.cloudbreak.cloud.model.ResourceStatus;
-import com.sequenceiq.cloudbreak.cloud.yarn.client.model.core.ApplicationState;
 
 public class YarnApplicationStatus {
     private YarnApplicationStatus() {
