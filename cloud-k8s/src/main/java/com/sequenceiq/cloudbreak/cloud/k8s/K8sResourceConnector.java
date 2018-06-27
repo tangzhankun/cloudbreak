@@ -40,6 +40,7 @@ import com.sequenceiq.cloudbreak.cloud.notification.PersistenceNotifier;
 import io.kubernetes.client.ApiClient;
 import io.kubernetes.client.ApiException;
 import io.kubernetes.client.Configuration;
+import io.kubernetes.client.apis.AppsV1beta1Api;
 import io.kubernetes.client.apis.CoreV1Api;
 import io.kubernetes.client.custom.Quantity;
 import io.kubernetes.client.models.AppsV1beta1Deployment;
@@ -99,19 +100,15 @@ public class K8sResourceConnector implements ResourceConnector<Object> {
     public List<CloudResourceStatus> launch(AuthenticatedContext authenticatedContext, CloudStack stack, PersistenceNotifier persistenceNotifier,
             AdjustmentType adjustmentType, Long threshold) throws Exception {
         K8sCredentialView k8sClient = k8sClientUtil.createK8sClient(authenticatedContext);
-        String applicationName = createApplicationName(authenticatedContext);
+        String clusterName = k8sResourceNameGenerator.getClusterName(authenticatedContext);
 
-
-        if (!checkApplicationAlreadyCreated(k8sClient, applicationName)) {
+        if (!checkApplicationAlreadyCreated(k8sClient, clusterName)) {
             createApplication(authenticatedContext, k8sClient, stack);
         }
 
-        CloudResource k8sApplication = new Builder().type(K8S_APPLICATION).name(applicationName).build();
+        CloudResource k8sApplication = new Builder().type(K8S_APPLICATION).name(clusterName).build();
         persistenceNotifier.notifyAllocation(k8sApplication, authenticatedContext.getCloudContext());
         return check(authenticatedContext, Collections.singletonList(k8sApplication));
-
-        K8sComponent k8sComponent = new K8sComponent();
-        K8sApiUtils.createK8sApp(stack., applicationName);
     }
 
     public ApiClient apiClient() throws IOException {
@@ -145,136 +142,176 @@ public class K8sResourceConnector implements ResourceConnector<Object> {
         return labels;
     }
 
-    private void createInstance(AuthenticatedContext ac, CloudStack stack, Group group, int i) {
+    private void createInstance(AuthenticatedContext ac, CloudStack stack, Group group, int i) throws IOException, ApiException {
         String instanceName = k8sResourceNameGenerator.getInstanceContainerName(ac, group, i);
         String groupName = k8sResourceNameGenerator.getGroupName(group);
         String clusterName = k8sResourceNameGenerator.getClusterName(ac);
+        appsV1beta1Api().createNamespacedDeployment(defaultNameSpace, appsV1beta1Deployment(stack, group, instanceName, clusterName), null);
+        coreV1Api().createNamespacedService(defaultNameSpace, v1Service(clusterName), null);
+    }
 
+    private V1Service v1Service(String clusterName) {
+        V1Service serviceBody = new V1Service();
+
+        serviceBody.setMetadata(v1ObjectMeta(clusterName));
+        serviceBody.setSpec(v1ServiceSpec());
+        return serviceBody;
+    }
+
+    private V1ServiceSpec v1ServiceSpec(String clusterName) {
+        V1ServiceSpec v1ServiceSpec = new V1ServiceSpec();
+        v1ServiceSpec.setType("LoadBalancer");
+        v1ServiceSpec.setSelector(selectorMap(clusterName));
+        return v1ServiceSpec;
+    }
+
+    private AppsV1beta1Api appsV1beta1Api() throws IOException {
+        return new AppsV1beta1Api(apiClient());
+    }
+
+    private AppsV1beta1Deployment appsV1beta1Deployment(CloudStack stack, Group group, String instanceName, String clusterName) {
         AppsV1beta1Deployment deployment = new AppsV1beta1Deployment();
 
         deployment.setKind("Deployment");
         deployment.setApiVersion("apps/v1beta1");
-        V1ObjectMeta meta = new V1ObjectMeta();
-        deployment.setMetadata(meta);
+        deployment.setMetadata(v1ObjectMeta(clusterName));
+        deployment.setSpec(appsV1beta1DeploymentSpec());
+        deployment.getSpec().setTemplate(v1PodTemplateSpec(instanceName, stack.getImage().getImageName(), group));
+        return deployment;
+    }
 
-        meta.setName(clusterName);
-        meta.setLabels(getLabels(clusterName, Optional.empty()));
+    private V1Container v1Container(String instanceName, String imageName, Group group) {
+        V1Container v1Container = new V1Container();
+        v1Container.setName(instanceName);
+        v1Container.setImage(imageName);
+        v1Container.setCommand(cmd());
+        V1SecurityContext secContext = v1SecurityContext();
+        v1Container.setSecurityContext(secContext);
+        v1Container.setVolumeMounts(new ArrayList<>());
+        v1Container.getVolumeMounts().add(configVolume());
+        v1Container.setPorts(new ArrayList<>());
+        v1Container.getPorts().add(sshPort());
+        v1Container.getPorts().add(nginxPort());
+        v1Container.getPorts().add(ambariPort());
+        v1Container.setResources(v1ResourceRequirements(group));
+        return v1Container;
+    }
 
-        AppsV1beta1DeploymentSpec spec = new AppsV1beta1DeploymentSpec();
-        deployment.setSpec(spec);
-
-        spec.setReplicas(1);
-
-        V1LabelSelector selector = new V1LabelSelector();
-        Map<String, String> matchLabels = new HashMap<>();
-        matchLabels.put(APP_NAME, clusterName);
-        matchLabels.put(CB_CLUSTER_NAME, clusterName);
-        selector.matchLabels(matchLabels);
-        spec.setSelector(selector);
-
-        V1PodTemplateSpec podTemplateSpec = new V1PodTemplateSpec();
-        spec.setTemplate(podTemplateSpec);
-
-        V1ObjectMeta podMeta = new V1ObjectMeta();
-        podMeta.setLabels(matchLabels);
-        podTemplateSpec.setMetadata(podMeta);
-
-        V1PodSpec podSpec = new V1PodSpec();
-        podTemplateSpec.setSpec(podSpec);
-
-        List<V1Container> containers = new ArrayList<>();
-        podSpec.setContainers(containers);
-
-        V1Container container = new V1Container();
-        containers.add(container);
-
-        container.setName(instanceName);
-        container.setImage(stack.getImage().getImageName());
-
-        List<String> cmd = new ArrayList<>();
-        cmd.add("/sbin/init");
-        container.setCommand(cmd);
-
+    private V1SecurityContext v1SecurityContext() {
         V1SecurityContext secContext = new V1SecurityContext();
         secContext.setPrivileged(true);
-        container.setSecurityContext(secContext);
+        return secContext;
+    }
 
-        List<V1VolumeMount> volumeMounts = new ArrayList<>();
-        container.setVolumeMounts(volumeMounts);
+    private V1PodTemplateSpec v1PodTemplateSpec(String instanceName, String imageName, Group group) {
+        V1PodTemplateSpec v1PodTemplateSpec = new V1PodTemplateSpec();
+        v1PodTemplateSpec.setMetadata(v1ObjectMeta());
+        v1PodTemplateSpec.setSpec(v1ProdSpec(instanceName, imageName, group));
+        return v1PodTemplateSpec;
+    }
 
-        V1VolumeMount configVolumeMount = new V1VolumeMount();
-        configVolumeMount.setName("config-volume");
-        configVolumeMount.setMountPath("/configmap");
-        volumeMounts.add(configVolumeMount);
+    private V1ObjectMeta v1ObjectMeta(String clusterName, Optional<String> groupName) {
+        V1ObjectMeta podMeta = new V1ObjectMeta();
+        podMeta.setLabels(getLabels(clusterName, groupName));
+        return podMeta;
+    }
 
-        List<V1ContainerPort> ports = new ArrayList<>();
-        container.setPorts(ports);
+    private V1PodSpec v1ProdSpec(String instanceName, String imageName, Group group) {
+        V1PodSpec v1PodSpec = new V1PodSpec();
+        v1PodSpec.setVolumes(new ArrayList<>());
+        v1PodSpec.getVolumes().add(configMapVolume());
+        v1PodSpec.setContainers(new ArrayList<>());
+        v1PodSpec.getContainers().add(v1Container(instanceName, imageName, group));
+        return v1PodSpec;
+    }
 
-        V1ContainerPort sshPort = new V1ContainerPort();
-        sshPort.setContainerPort(SSH_PORT);
-        sshPort.setName("ssh");
-        ports.add(sshPort);
+    private List<String> cmd() {
+        List<String> cmd = new ArrayList<>();
+        cmd.add("/sbin/init");
+        return cmd;
+    }
 
-        V1ContainerPort ngnixPort = new V1ContainerPort();
-        ngnixPort.setName("ngnix");
-        ngnixPort.setContainerPort(NGNIX_PORT);
-        ports.add(ngnixPort);
-
-        V1ContainerPort saltPort = new V1ContainerPort();
-        saltPort.setName("ambari");
-        saltPort.setContainerPort(AMBARI_PORT);
-        ports.add(saltPort);
-
-        V1ResourceRequirements resources = new V1ResourceRequirements();
-        resources.putLimitsItem("memory", Quantity.fromString(group.getReferenceInstanceConfiguration().getTemplate(). + "Mi"));
-        resources.putLimitsItem("cpu", Quantity.fromString(component.getResource().getCpus() + ""));
-        container.setResources(resources);
-        List<V1Volume> volumes = new ArrayList<>();
-        podSpec.setVolumes(volumes);
-
+    private V1Volume configMapVolume() {
         V1Volume configVolume = new V1Volume();
         configVolume.setName("config-volume");
+        configVolume.setConfigMap(configMap());
+        return configVolume;
+    }
+
+    private V1ConfigMapVolumeSource configMap() {
         V1ConfigMapVolumeSource configMap = new V1ConfigMapVolumeSource();
         configMap.setDefaultMode(DEFAULT_MODE);
         configMap.setName(configName);
+        return configMap;
+    }
 
-        configVolume.setConfigMap(configMap);
-        volumes.add(configVolume);
+    private V1ResourceRequirements v1ResourceRequirements(Group group) {
+        V1ResourceRequirements resources = new V1ResourceRequirements();
+        resources.putLimitsItem("memory", Quantity.fromString(group.getReferenceInstanceConfiguration().getTemplate() + "Mi"));
+        resources.putLimitsItem("cpu", Quantity.fromString(group.getReferenceInstanceConfiguration().getTemplate()..getCpus() + ""));
+        return resources;
+    }
 
-        appsV1beta1Api.createNamespacedDeployment(DEFAULT_NAMESPACE, deployment, null);
+    private V1ContainerPort ambariPort() {
+        V1ContainerPort saltPort = new V1ContainerPort();
+        saltPort.setName("ambari");
+        saltPort.setContainerPort(AMBARI_PORT);
+        return saltPort;
+    }
 
-        LOGGER.info("Created Deployment " + appName);
+    private V1ContainerPort nginxPort() {
+        V1ContainerPort ngnixPort = new V1ContainerPort();
+        ngnixPort.setName("ngnix");
+        ngnixPort.setContainerPort(NGNIX_PORT);
+        return ngnixPort;
+    }
 
-        V1Service serviceBody = new V1Service();
+    private V1ContainerPort sshPort() {
+        V1ContainerPort sshPort = new V1ContainerPort();
+        sshPort.setContainerPort(SSH_PORT);
+        sshPort.setName("ssh");
+        return sshPort;
+    }
 
-        serviceBody.setMetadata(meta);
+    private V1VolumeMount configVolume() {
+        V1VolumeMount configVolumeMount = new V1VolumeMount();
+        configVolumeMount.setName("config-volume");
+        configVolumeMount.setMountPath("/configmap");
+        return configVolumeMount;
+    }
 
-        meta.setName(appName);
-        Map<String, String> labels = new HashMap<>();
-        labels.put(HWX_DPS_CLUSTER_NAME, hdpClusterName);
-        labels.put(HWX_DPS_CLUSTER_GROUP, group);
-        meta.setLabels(labels);
+    private AppsV1beta1DeploymentSpec appsV1beta1DeploymentSpec(String clusterName) {
+        AppsV1beta1DeploymentSpec appsV1beta1DeploymentSpec = new AppsV1beta1DeploymentSpec();
+        appsV1beta1DeploymentSpec.setReplicas(1);
+        appsV1beta1DeploymentSpec.setSelector(v1LabelSelector(clusterName));
+        return appsV1beta1DeploymentSpec;
+    }
 
-        V1ServiceSpec serviceSpec = new V1ServiceSpec();
-        serviceSpec.setType("LoadBalancer");
-        Map<String, String> selectorMap = new HashMap<>();
-        serviceSpec.setSelector(selectorMap);
-
-        selectorMap.put("app", appName);
-
-        serviceBody.setSpec(serviceSpec);
-
-        api.createNamespacedService(DEFAULT_NAMESPACE, serviceBody, null);
-
-        LOGGER.info("Created Service " + appName);
+    private V1ObjectMeta v1ObjectMeta(String clusterName) {
+        V1ObjectMeta meta = new V1ObjectMeta();
+        meta.setName(clusterName);
+        meta.setLabels(getLabels(clusterName, Optional.empty()));
+        return meta;
     }
 
     private void createApiClient() throws IOException {
         ApiClient client = apiClient();
         Configuration.setDefaultApiClient(client);
-
-
     }
+
+    private V1LabelSelector v1LabelSelector(String clusterName) {
+        V1LabelSelector selector = new V1LabelSelector();
+        selector.matchLabels(selectorMap(clusterName));
+        return selector;
+    }
+
+    private Map<String, String> selectorMap(String clusterName) {
+        Map<String, String> matchLabels = new HashMap<>();
+        matchLabels.put(APP_NAME, clusterName);
+        matchLabels.put(CB_CLUSTER_NAME, clusterName);
+        return matchLabels;
+    }
+
 
     private void createConfigMap(AuthenticatedContext ac, CloudStack stack) throws IOException, ApiException {
         StringBuffer sb = new StringBuffer();
