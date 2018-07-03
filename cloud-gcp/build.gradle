@@ -6,6 +6,18 @@ repositories {
     mavenCentral()
 }
 
+ext.moduleName = 'cloud.gcp'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
     baseName = 'cloud-gcp'
     archiveName = 'cloud-gcp.jar'

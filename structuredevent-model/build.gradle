@@ -4,13 +4,24 @@ repositories {
     mavenCentral()
 }
 
+ext.moduleName = 'structuredevent.model'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
     baseName = 'structuredevent-model'
     archiveName = 'structuredevent-model.jar'
 }
 
 dependencies {
-    compile group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: jacksonVersion
-    testCompile group: 'junit',                     name: 'junit',                          version: junitVersion
-
+    compile     group: 'com.fasterxml.jackson.core',  name: 'jackson-databind',  version: jacksonVersion
+    testCompile group: 'junit',                       name: 'junit',             version: junitVersion
 }

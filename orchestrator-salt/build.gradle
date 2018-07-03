@@ -5,6 +5,18 @@ repositories {
     mavenCentral()
 }
 
+ext.moduleName = 'orchestrator.salt'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
     baseName = 'orchestrator-salt'
     archiveName = 'orchestrator-salt.jar'

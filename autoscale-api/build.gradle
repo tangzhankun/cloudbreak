@@ -4,6 +4,18 @@ repositories {
   mavenCentral()
 }
 
+ext.moduleName = 'autoscale.api'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
   baseName = 'autoscale-api'
   archiveName = 'autoscale-api.jar'

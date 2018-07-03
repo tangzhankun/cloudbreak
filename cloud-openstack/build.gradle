@@ -6,6 +6,18 @@ repositories {
     mavenCentral()
 }
 
+ext.moduleName = 'cloud.openstack'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
     baseName = 'cloud-openstack'
     archiveName = 'cloud-openstack.jar'

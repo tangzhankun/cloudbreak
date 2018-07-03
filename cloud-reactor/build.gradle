@@ -6,6 +6,18 @@ repositories {
     mavenCentral()
 }
 
+ext.moduleName = 'cloud.reactor'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
     baseName = 'cloud-reactor'
     archiveName = 'cloud-reactor.jar'

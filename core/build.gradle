@@ -37,6 +37,18 @@ springBoot {
     mainClassName = 'com.sequenceiq.cloudbreak.CloudbreakApplication'
 }
 
+ext.moduleName = 'core'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
     baseName = 'cloudbreak'
     archiveName = 'cloudbreak.jar'

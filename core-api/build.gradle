@@ -1,7 +1,29 @@
 apply plugin: 'java'
 
-repositories {
-  mavenCentral()
+buildscript {
+  repositories {
+    maven {
+      url "https://plugins.gradle.org/m2/"
+    }
+    mavenCentral()
+  }
+  dependencies {
+    classpath "io.spring.gradle:dependency-management-plugin:1.0.5.RELEASE"
+  }
+}
+
+apply plugin: "io.spring.dependency-management"
+
+ext.moduleName = 'core.api'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
 }
 
 jar {
@@ -9,38 +31,98 @@ jar {
   archiveName = 'core-api.jar'
 }
 
-dependencies {
-  compile group: 'org.slf4j',                     name: 'slf4j-api',                      version: slf4jApiVersion
-  compile group: 'org.glassfish.jersey.media',    name: 'jersey-media-multipart',         version: jerseyCoreVersion
-  compile group: 'io.swagger',                    name: 'swagger-annotations',            version: swaggerVersion
-  compile group: 'commons-codec',                 name: 'commons-codec',                  version: '1.10'
-  compile group: 'commons-net',                   name: 'commons-net',                    version: '3.3'
+dependencyManagement {
 
-  compile group: 'net.jodah',                     name: 'expiringmap',                    version: '0.5.1'
-  compile group: 'org.glassfish.jersey.core',     name: 'jersey-client',                  version: jerseyCoreVersion
-  compile group: 'org.glassfish.jersey.media',    name: 'jersey-media-json-jackson',      version: jerseyCoreVersion
-  compile group: 'org.glassfish.jersey.ext',      name: 'jersey-proxy-client',            version: jerseyCoreVersion
-  compile group: 'org.bouncycastle',              name: 'bcprov-jdk15on',                 version: bouncycastleVersion
-  compile group: 'org.bouncycastle',              name: 'bcpkix-jdk15on',                 version: bouncycastleVersion
+  dependencies {
+    dependency group: 'org.slf4j',                     name: 'slf4j-api',                      version: slf4jApiVersion
+    dependency group: 'io.swagger',                    name: 'swagger-annotations',            version: swaggerVersion
+    dependency group: 'commons-codec',                 name: 'commons-codec',                  version: '1.10'
+    dependency group: 'commons-net',                   name: 'commons-net',                    version: '3.3'
 
-  compile group: 'com.fasterxml.jackson.jaxrs',   name: 'jackson-jaxrs-json-provider',    version: jacksonVersion
-  compile (group: 'com.fasterxml.jackson.core',   name: 'jackson-databind',               version: jacksonVersion) {
-    force = true
+    dependency group: 'net.jodah',                     name: 'expiringmap',                    version: '0.5.1'
+    dependency group: 'org.glassfish.jersey.core',     name: 'jersey-client',                  version: jerseyCoreVersion
+    dependency group: 'org.glassfish.jersey.connectors',  name: 'jersey-apache-connector',     version: jerseyCoreVersion
+    dependency group: 'org.glassfish.jersey.ext',      name: 'jersey-proxy-client',            version: jerseyCoreVersion
+
+    dependencySet (group: 'org.glassfish.jersey.media',    name: 'jersey-media-multipart',         version: jerseyCoreVersion) {
+      entry 'jersey-media-multipart'
+      entry 'jersey-media-json-jackson'
+    }
+
+    dependencySet (group: 'org.bouncycastle',              name: 'bcprov-jdk15on',                 version: bouncycastleVersion) {
+      entry 'bcprov-jdk15on'
+      entry 'bcpkix-jdk15on'
+    }
+
+    dependency group: 'com.fasterxml.jackson.jaxrs',   name: 'jackson-jaxrs-json-provider',    version: jacksonVersion
+    dependency group: 'com.fasterxml.jackson.core',   name: 'jackson-databind',               version: jacksonVersion
+
+    dependency (group: 'org.springframework.boot',      name: 'spring-boot-starter-security',   version: springBootVersion) {
+      exclude group: 'commons-logging', name: 'commons.logging'
+      exclude group: 'commons-logging', name: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons.logging'
+    }
+    dependency (group: 'org.springframework.security.oauth', name: 'spring-security-oauth2',    version: springOauthVersion) {
+      exclude group: 'commons-logging', name: 'commons.logging'
+      exclude group: 'commons-logging', name: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons.logging'
+    }
+    dependency group: 'org.hibernate',                 name: 'hibernate-validator',            version: hibernateValidatorVersion
+    dependency group: 'org.apache.commons',            name: 'commons-lang3',                  version: apacheCommonsLangVersion
+    dependency group: 'org.apache.httpcomponents',     name: 'httpclient',                     version: '4.5.1'
+    dependency group: 'com.google.code.findbugs',      name: 'annotations',                    version: '3.0.1'
+    dependency group: 'com.google.guava',              name: 'guava',                          version: guavaVersion
+
+    dependency group: 'org.mockito',               name: 'mockito-core',                   version: mockitoVersion
+    dependency (group: 'org.springframework.boot',  name: 'spring-boot-starter',            version: springBootVersion) {
+      exclude group: 'commons-logging', name: 'commons.logging'
+      exclude group: 'commons-logging', name: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons.logging'
+    }
+    dependency (group: 'org.springframework.boot',  name: 'spring-boot-starter-test',       version: springBootVersion) {
+      exclude group: 'commons-logging', name: 'commons.logging'
+      exclude group: 'commons-logging', name: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons-logging'
+      exclude group: 'commons-logging', module: 'commons.logging'
+    }
+    dependency group: 'junit',                     name: 'junit',                          version: junitVersion
+    dependency group: 'org.apache.tomcat.embed',   name: 'tomcat-embed-el',                version: '9.0.8'
   }
-  compile group: 'org.hibernate',                 name: 'hibernate-validator',            version: hibernateValidatorVersion
-  compile group: 'org.apache.httpcomponents',     name: 'httpclient',                     version: '4.5.1'
-  compile group: 'org.glassfish.jersey.connectors',  name: 'jersey-apache-connector',     version: jerseyCoreVersion
-  compile group: 'com.google.code.findbugs',      name: 'annotations',                    version: '3.0.1'
-  compile group: 'org.springframework.boot',      name: 'spring-boot-starter-security',   version: springBootVersion
-  compile group: 'com.google.guava',              name: 'guava',                          version: guavaVersion
-  compile group: 'org.springframework.security.oauth', name: 'spring-security-oauth2',    version: springOauthVersion
-  compile group: 'org.apache.commons',            name: 'commons-lang3',                  version: apacheCommonsLangVersion
+}
 
-  testCompile group: 'org.mockito',               name: 'mockito-core',                   version: mockitoVersion
-  testCompile group: 'org.springframework.boot',  name: 'spring-boot-starter',            version: springBootVersion
-  testCompile group: 'org.springframework.boot',  name: 'spring-boot-starter-test',       version: springBootVersion
-  testCompile group: 'junit',                     name: 'junit',                          version: junitVersion
-  testCompile group: 'org.apache.tomcat.embed',   name: 'tomcat-embed-el',                version: '9.0.8'
+dependencies {
+  compile group: 'org.slf4j',                     name: 'slf4j-api'
+  compile group: 'io.swagger',                    name: 'swagger-annotations'
+  compile group: 'commons-codec',                 name: 'commons-codec'
+  compile group: 'commons-net',                   name: 'commons-net'
+
+  compile group: 'net.jodah',                     name: 'expiringmap'
+  compile group: 'org.glassfish.jersey.core',     name: 'jersey-client'
+  compile group: 'org.glassfish.jersey.connectors',  name: 'jersey-apache-connector'
+  compile group: 'org.glassfish.jersey.media',    name: 'jersey-media-multipart'
+  compile group: 'org.glassfish.jersey.media',    name: 'jersey-media-json-jackson'
+  compile group: 'org.glassfish.jersey.ext',      name: 'jersey-proxy-client'
+  compile group: 'org.bouncycastle',              name: 'bcprov-jdk15on'
+  compile group: 'org.bouncycastle',              name: 'bcpkix-jdk15on'
+
+  compile group: 'com.fasterxml.jackson.jaxrs',   name: 'jackson-jaxrs-json-provider'
+  compile group: 'com.fasterxml.jackson.core',    name: 'jackson-databind'
+  compile group: 'org.springframework.boot',      name: 'spring-boot-starter-security'
+  compile group: 'org.springframework.security.oauth', name: 'spring-security-oauth2'
+  compile group: 'org.hibernate',                 name: 'hibernate-validator'
+  compile group: 'org.apache.httpcomponents',     name: 'httpclient'
+  compile group: 'org.apache.commons',            name: 'commons-lang3'
+  compile group: 'com.google.code.findbugs',      name: 'annotations'
+  compile group: 'com.google.guava',              name: 'guava'
+
+  testCompile group: 'org.mockito',               name: 'mockito-core'
+  testCompile group: 'org.springframework.boot',  name: 'spring-boot-starter'
+  testCompile group: 'org.springframework.boot',  name: 'spring-boot-starter-test'
+  testCompile group: 'junit',                     name: 'junit'
+  testCompile group: 'org.apache.tomcat.embed',   name: 'tomcat-embed-el'
 
   compile project(':structuredevent-model')
 }

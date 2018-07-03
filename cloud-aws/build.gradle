@@ -6,6 +6,18 @@ repositories {
   mavenCentral()
 }
 
+ext.moduleName = 'cloud.aws'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
   baseName = 'cloud-aws'
   archiveName = 'cloud-aws.jar'

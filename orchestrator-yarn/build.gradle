@@ -5,6 +5,18 @@ repositories {
   mavenCentral()
 }
 
+ext.moduleName = 'orchestrator.yarn'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
   baseName = 'orchestrator-yarn'
   archiveName = 'orchestrator-yarn.jar'

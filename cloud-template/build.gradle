@@ -5,6 +5,18 @@ repositories {
     mavenCentral()
 }
 
+ext.moduleName = 'cloud.template'
+
+compileJava {
+  inputs.property("moduleName", moduleName)
+  doFirst {
+    options.compilerArgs = [
+            '--module-path', classpath.asPath,
+    ]
+    classpath = files()
+  }
+}
+
 jar {
     baseName = 'cloud-template'
     archiveName = 'cloud-template.jar'
